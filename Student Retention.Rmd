@@ -1,0 +1,1487 @@
+---
+title: "Student Retention"
+output: html_document
+---
+
+### Necessary Packages
+
+```{r message=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+library(caret)
+library(MASS)
+library(pROC)
+library(ggplot2)
+library(pdp)
+library(bnstruct)
+library(DMwR)
+```
+
+### Importing Data
+
+```{r message=FALSE}
+cob.rt <- read.csv("COB RT Data.csv")
+dim(cob.rt)
+```
+
+### Variable Selection
+
+Variables Removed:
+STUDNUM, TERM, CAMPUS, STATE_CODE, ZIP_CODE, COUNTY_CODE, RESIDENCY_CODE, LEGAL_COUNTRY, LEGAL_COUNTRY_DESC, HIGH_SCHOOL_CODE, HIGH_SCHOOL_DESC, VETERAN_IND, HONORS_REGISTERED_IND, along with any COLLEGE, MAJOR, DEGREE, MIDTERM_GPA Variables. It was decided that variables either didn't support or improve the model or contained to many missing values.
+
+Variables Kept:
+GENDER, URS_IND, ETHNICITY_CODE, ONCAMPUS_IND, FIRST_GEN_IND, PELL_ELIG_IND, AGE, INTERNATIONAL_IND, HIGH_SCHOOL_GPA, ATHLETE_IND, TRANS_HRS, ACT_ENGL, ACT_MATH, ACT_SOC, ACT_NSCI, ACT_WRITING, ACT_COMP, along with CURATTHRS, CURERNHRS, CUMERNHRS, TERM_GPA, CUM_GPA, which were added for every semester going forward.
+
+### Creating Datasets for all 12 Models
+
+```{r}
+f1 <- cob.rt
+s1 <- cob.rt %>% filter(RET_S1 == "Y")
+f2 <- cob.rt %>% filter(RET_F2 == "Y")
+s2 <- cob.rt %>% filter(RET_S2 == "Y")
+f3 <- cob.rt %>% filter(RET_F3 == "Y")
+s3 <- cob.rt %>% filter(RET_S3 == "Y")
+f4 <- cob.rt %>% filter(RET_F4 == "Y")
+s4 <- cob.rt %>% filter(RET_S4 == "Y")
+f5 <- cob.rt %>% filter(RET_F5 == "Y")
+s5 <- cob.rt %>% filter(RET_S5 == "Y")
+f6 <- cob.rt %>% filter(RET_F6 == "Y")
+s6 <- cob.rt %>% filter(RET_S6 == "Y")
+```
+
+### Fall 1 Semester 1
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_S1 <- f1$RET_S1 
+f1.x <- cbind(f1[,4:9], f1[,13:14], f1[18], f1[21], f1[,24:30], f1[,38:40], f1[42], f1[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+f1.rt.reduced <- cbind(RET_S1, f1.x)
+f1.knn <- knnImputation(f1.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.f1 <- floor(0.80 * nrow(f1.knn))
+
+set.seed(2)
+train_ind.f1 <- sample(seq_len(nrow(f1.knn)), size = smp_size.f1)
+
+train.f1 <- f1.knn[train_ind.f1, ]
+test.f1 <- f1.knn[-train_ind.f1, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.f1 <- glm(RET_S1 ~ . -GRADUATEIND, family = binomial, data = train.f1)
+step.retain.f1 <- stepAIC(retain.f1, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.f1, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.f1 <- predict(step.retain.f1, test.f1, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.f1 > .70)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f1$RET_S1, mode = "prec_recall")
+roc(test.f1$RET_S1, as.numeric(p.retain.f1))
+```
+
+# Fall Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Earned Hours
+par.URS_IND  <- partial(step.retain.f1, pred.var = c("URS_IND"), chull = TRUE)
+plot.URS_IND  <- autoplot(par.URS_IND, contour = TRUE)
+
+# Current Term GPA
+par.ACT_MATH  <- partial(step.retain.f1, pred.var = c("ACT_MATH"), chull = TRUE)
+plot.ACT_MATH  <- autoplot(par.ACT_MATH, contour = TRUE)
+
+# ACT Writing Score
+par.ACT_WRITING  <- partial(step.retain.f1, pred.var = c("ACT_WRITING"), chull = TRUE)
+plot.ACT_WRITING  <- autoplot(par.ACT_WRITING, contour = TRUE)
+
+# High School GPA
+par.F1SEQ2_CURERNHRS <- partial(step.retain.f1, pred.var = c("F1SEQ2_CURERNHRS"), chull = TRUE)
+plot.F1SEQ2_CURERNHRS <- autoplot(par.F1SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.URS_IND, plot.ACT_MATH, plot.ACT_WRITING, plot.F1SEQ2_CURERNHRS)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.f1 <- glm(GRADUATEIND ~ . -RET_S1, family = binomial, data = train.f1)
+step.graduate.f1 <- stepAIC(graduate.f1, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.f1, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.f1 <- predict(step.graduate.f1, test.f1, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.f1 > .50)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f1$GRADUATEIND, mode = "prec_recall")
+roc(test.f1$GRADUATEIND, as.numeric(p.graduate.f1))
+```
+
+# Fall Graduation Dependency Plots
+
+```{r}
+# Current Term GPA
+par.F1SEQ2_TERM_GPA  <- partial(step.graduate.f1, pred.var = c("F1SEQ2_TERM_GPA"), chull = TRUE)
+plot.F1SEQ2_TERM_GPA  <- autoplot(par.F1SEQ2_TERM_GPA , contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.graduate.f1, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS , contour = TRUE)
+
+# Current Earned Hours
+par.F1SEQ2_CURERNHRS  <- partial(step.graduate.f1, pred.var = c("F1SEQ2_CURERNHRS"), chull = TRUE)
+plot.F1SEQ2_CURERNHRS  <- autoplot(par.F1SEQ2_CURERNHRS, contour = TRUE)
+
+# Living On Campus
+par.ONCAMPUS_IND <- partial(step.graduate.f1, pred.var = c("ONCAMPUS_IND"), chull = TRUE)
+plot.ONCAMPUS_IND <- autoplot(par.ONCAMPUS_IND, contour = TRUE)
+
+grid.arrange(plot.F1SEQ2_TERM_GPA, plot.TRANS_HRS, plot.F1SEQ2_CURERNHRS, plot.ONCAMPUS_IND)
+```
+
+### Spring 1 Semester 2
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_F2 <- s1$RET_F2 
+s1.x <- cbind(s1[,4:9], s1[,13:14], s1[18], s1[21], s1[,24:30], s1[,38:40], s1[42], s1[,50:52], s1[,54:55], s1[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+s1.rt.reduced <- cbind(RET_F2, s1.x)
+s1.knn <- knnImputation(s1.rt.reduced)
+```
+
+Third step is splitting the data into train and test. modeling the data and tuning with stepwise regression.
+
+```{r}
+smp_size.s1 <- floor(0.80 * nrow(s1.knn))
+
+set.seed(2)
+train_ind.s1 <- sample(seq_len(nrow(s1.knn)), size = smp_size.s1)
+
+train.s1 <- s1.knn[train_ind.s1, ]
+test.s1 <- s1.knn[-train_ind.s1, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.s1 <- glm(RET_F2 ~ . -GRADUATEIND, family = binomial, data = train.s1)
+step.retain.s1 <- stepAIC(retain.s1, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.s1, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.s1 <- predict(step.retain.s1, test.s1, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.s1 > .80)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s1$RET_F2, mode = "prec_recall")
+roc(test.s1$RET_F2, as.numeric(p.retain.s1))
+```
+
+# Spring 1 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Earned Hours
+par.S1SEQ2_TERM_GPA <- partial(step.retain.s1, pred.var = c("S1SEQ2_TERM_GPA"), chull = TRUE)
+plot.S1SEQ2_TERM_GPA  <- autoplot(par.S1SEQ2_TERM_GPA, contour = TRUE)
+
+# Current Term GPA
+par.S1SEQ2_CURERNHRS  <- partial(step.retain.s1, pred.var = c("S1SEQ2_CURERNHRS"), chull = TRUE)
+plot.S1SEQ2_CURERNHRS  <- autoplot(par.S1SEQ2_CURERNHRS, contour = TRUE)
+
+# ACT Writing Score
+par.S1SEQ2_TERM_GPA  <- partial(step.retain.s1, pred.var = c("S1SEQ2_TERM_GPA"), chull = TRUE)
+plot.S1SEQ2_TERM_GPA  <- autoplot(par.S1SEQ2_TERM_GPA, contour = TRUE)
+
+# High School GPA
+par.F1SEQ2_CURERNHRS <- partial(step.retain.s1, pred.var = c("F1SEQ2_CURERNHRS"), chull = TRUE)
+plot.F1SEQ2_CURERNHRS <- autoplot(par.F1SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.S1SEQ2_TERM_GPA, plot.S1SEQ2_CURERNHRS, plot.S1SEQ2_TERM_GPA, plot.F1SEQ2_CURERNHRS)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.s1 <- glm(GRADUATEIND ~ . -RET_F2, family = binomial, data = train.s1)
+step.graduate.s1 <- stepAIC(graduate.s1, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.s1, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.s1 <- predict(step.graduate.s1, test.s1, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.s1 > .50)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s1$GRADUATEIND, mode = "prec_recall")
+roc(test.s1$GRADUATEIND, as.numeric(p.graduate.s1))
+```
+
+# Spring 1 Graduation Dependency Plots
+
+```{r}
+# Current Term GPA
+par.S1SEQ2_CUMERNHRS  <- partial(step.graduate.s1, pred.var = c("S1SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S1SEQ2_CUMERNHRS  <- autoplot(par.S1SEQ2_CUMERNHRS , contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.graduate.s1, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS , contour = TRUE)
+
+# Current Earned Hours
+par.S1SEQ2_TERM_GPA  <- partial(step.graduate.s1, pred.var = c("S1SEQ2_TERM_GPA"), chull = TRUE)
+plot.S1SEQ2_TERM_GPA  <- autoplot(par.S1SEQ2_TERM_GPA, contour = TRUE)
+
+# Living On Campus
+par.S1SEQ2_TERM_GPA <- partial(step.graduate.s1, pred.var = c("S1SEQ2_TERM_GPA"), chull = TRUE)
+plot.S1SEQ2_TERM_GPA <- autoplot(par.S1SEQ2_TERM_GPA, contour = TRUE)
+
+grid.arrange(plot.S1SEQ2_CUMERNHRS, plot.TRANS_HRS, plot.S1SEQ2_TERM_GPA, plot.S1SEQ2_TERM_GPA)
+```
+
+### Fall 2 Semester 3
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_S2 <- f2$RET_S2
+f2.x <- cbind(f2[,4:9], f2[,13:14], f2[18], f2[21], f2[,24:30], f2[,38:40], f2[42], f2[,50:52], f2[,54:55], f2[,62:64], f2[,66:67], f2[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+f2.rt.reduced <- cbind(RET_S2, f2.x)
+f2.knn <- knnImputation(f2.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.f2 <- floor(0.80 * nrow(f2.knn))
+
+set.seed(2)
+train_ind.f2 <- sample(seq_len(nrow(f2.knn)), size = smp_size.f2)
+
+train.f2 <- f2.knn[train_ind.f2, ]
+test.f2 <- f2.knn[-train_ind.f2, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.f2 <- glm(RET_S2 ~ . -GRADUATEIND, family = binomial, data = train.f2)
+step.retain.f2 <- stepAIC(retain.f2, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.f2, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.f2 <- predict(step.retain.f2, test.f2, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.f2 > .80)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f2$RET_S2, mode = "prec_recall")
+roc(test.f2$RET_S2, as.numeric(p.retain.f2))
+```
+
+# Fall 2 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Earned Hours
+par.F2SEQ2_CURERNHRS  <- partial(step.retain.f2, pred.var = c("F2SEQ2_CURERNHRS"), chull = TRUE)
+plot.F2SEQ2_CURERNHRS  <- autoplot(par.F2SEQ2_CURERNHRS, contour = TRUE)
+
+# Cumulative Term GPA
+par.F2SEQ2_CUM_GPA  <- partial(step.retain.f2, pred.var = c("F2SEQ2_CUM_GPA"), chull = TRUE)
+plot.F2SEQ2_CUM_GPA  <- autoplot(par.F2SEQ2_CUM_GPA, contour = TRUE)
+
+# Previous Spring Attempted Hours
+par.S1SEQ2_CURATTHRS  <- partial(step.retain.f2, pred.var = c("S1SEQ2_CURATTHRS"), chull = TRUE)
+plot.S1SEQ2_CURATTHRS  <- autoplot(par.S1SEQ2_CURATTHRS, contour = TRUE)
+
+# Student Athletes
+par.ATHLETE_IND <- partial(step.retain.f2, pred.var = c("ATHLETE_IND"), chull = TRUE)
+plot.ATHLETE_IND <- autoplot(par.ATHLETE_IND, contour = TRUE)
+
+grid.arrange(plot.F2SEQ2_CURERNHRS, plot.F2SEQ2_CUM_GPA, plot.S1SEQ2_CURATTHRS, plot.ATHLETE_IND)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.f2 <- glm(GRADUATEIND ~ . -RET_S2, family = binomial, data = train.f2)
+step.graduate.f2 <- stepAIC(graduate.f2, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.f2, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.f2 <- predict(step.graduate.f2, test.f2, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.f2 > .50)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f2$GRADUATEIND, mode = "prec_recall")
+roc(test.f2$GRADUATEIND, as.numeric(p.graduate.f2))
+```
+
+# Fall 2 Graduation Dependency Plots
+
+```{r}
+# Age
+par.AGE  <- partial(step.graduate.f2, pred.var = c("AGE"), chull = TRUE)
+plot.AGE  <- autoplot(par.AGE, contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.graduate.f2, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS , contour = TRUE)
+
+# Current Earned Hours
+par.ACT_SOC  <- partial(step.graduate.f2, pred.var = c("ACT_SOC"), chull = TRUE)
+plot.ACT_SOC  <- autoplot(par.ACT_SOC, contour = TRUE)
+
+# Living On Campus
+par.ONCAMPUS_IND <- partial(step.graduate.f2, pred.var = c("ONCAMPUS_IND"), chull = TRUE)
+plot.ONCAMPUS_IND <- autoplot(par.ONCAMPUS_IND, contour = TRUE)
+
+grid.arrange(plot.AGE, plot.TRANS_HRS, plot.ACT_SOC, plot.ONCAMPUS_IND)
+```
+
+### Spring 2 Semester 4
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_F3 <- s2$RET_F3 
+s2.x <- cbind(s2[,4:9], s2[,13:14], s2[18], s2[21], s2[,24:30], s2[,38:40], s2[42], s2[,50:52], s2[,54:55], s2[,62:64], s2[,66:67], s2[,74:76], s2[,78:79], s2[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+s2.rt.reduced <- cbind(RET_F3, s2.x)
+s2.knn <- knnImputation(s2.rt.reduced)
+```
+
+Third step is splitting the data into train and test. modeling the data and tuning with stepwise regression.
+
+```{r}
+smp_size.s2 <- floor(0.80 * nrow(s2.knn))
+
+set.seed(2)
+train_ind.s2 <- sample(seq_len(nrow(s2.knn)), size = smp_size.s2)
+
+train.s2 <- s2.knn[train_ind.s2, ]
+test.s2 <- s2.knn[-train_ind.s2, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.s2 <- glm(RET_F3 ~ . -GRADUATEIND, family = binomial, data = train.s2)
+step.retain.s2 <- stepAIC(retain.s2, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.s2, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.s2 <- predict(step.retain.s2, test.s2, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.s2 > .85)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s2$RET_F3, mode = "prec_recall")
+roc(test.s2$RET_F3, as.numeric(p.retain.s2))
+```
+
+# Spring 2 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Earned Hours
+par.S2SEQ2_CURERNHRS <- partial(step.retain.s2, pred.var = c("S2SEQ2_CURERNHRS"), chull = TRUE)
+plot.S2SEQ2_CURERNHRS  <- autoplot(par.S2SEQ2_CURERNHRS, contour = TRUE)
+
+# Current Term Cummulative GPA
+par.S2SEQ2_CUM_GPA  <- partial(step.retain.s2, pred.var = c("S2SEQ2_CUM_GPA"), chull = TRUE)
+plot.S2SEQ2_CUM_GPA  <- autoplot(par.S2SEQ2_CUM_GPA, contour = TRUE)
+
+# ACT Writing Score
+par.F2SEQ2_CURERNHRS  <- partial(step.retain.s2, pred.var = c("F2SEQ2_CURERNHRS"), chull = TRUE)
+plot.F2SEQ2_CURERNHRS  <- autoplot(par.F2SEQ2_CURERNHRS, contour = TRUE)
+
+# High School GPA
+par.S1SEQ2_CUM_GPA <- partial(step.retain.s2, pred.var = c("S1SEQ2_CUM_GPA"), chull = TRUE)
+plot.S1SEQ2_CUM_GPA <- autoplot(par.S1SEQ2_CUM_GPA, contour = TRUE)
+
+grid.arrange(plot.S2SEQ2_CURERNHRS, plot.S2SEQ2_CUM_GPA, plot.F2SEQ2_CURERNHRS, plot.S1SEQ2_CUM_GPA)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.s2 <- glm(GRADUATEIND ~ . -RET_F3, family = binomial, data = train.s2)
+step.graduate.s2 <- stepAIC(graduate.s2, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.s2, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.s2 <- predict(step.graduate.s2, test.s2, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.s2 > .55)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s2$GRADUATEIND, mode = "prec_recall")
+roc(test.s2$GRADUATEIND, as.numeric(p.graduate.s2))
+```
+
+# Spring 2 Graduation Dependency Plots
+
+```{r}
+# Age
+par.AGE  <- partial(step.graduate.s2, pred.var = c("AGE"), chull = TRUE)
+plot.AGE  <- autoplot(par.AGE , contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.graduate.s2, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS , contour = TRUE)
+
+# First Fall Earned Hours
+par.F1SEQ2_CUMERNHRS  <- partial(step.graduate.s2, pred.var = c("F1SEQ2_CUMERNHRS"), chull = TRUE)
+plot.F1SEQ2_CUMERNHRS  <- autoplot(par.F1SEQ2_CUMERNHRS, contour = TRUE)
+
+# Living On Campus
+par.S2SEQ2_TERM_GPA <- partial(step.graduate.s2, pred.var = c("S2SEQ2_TERM_GPA"), chull = TRUE)
+plot.S2SEQ2_TERM_GPA <- autoplot(par.S2SEQ2_TERM_GPA, contour = TRUE)
+
+grid.arrange(plot.AGE, plot.TRANS_HRS, plot.F1SEQ2_CUMERNHRS, plot.S2SEQ2_TERM_GPA)
+```
+
+### Fall 3 Semester 5
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_S3 <- f3$RET_S3
+f3.x <- cbind(f3[,4:9], f3[,13:14], f3[18], f3[21], f3[,24:30], f3[,38:40], f3[42], f3[,50:52], f3[,54:55], f3[,62:64], f3[,66:67], f3[,74:76], f3[,78:79], f3[,86:88], f3[,90:91], f3[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+f3.rt.reduced <- cbind(RET_S3, f3.x)
+f3.knn <- knnImputation(f3.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.f3 <- floor(0.80 * nrow(f3.knn))
+
+set.seed(2)
+train_ind.f3 <- sample(seq_len(nrow(f3.knn)), size = smp_size.f3)
+
+train.f3 <- f3.knn[train_ind.f3, ]
+test.f3 <- f3.knn[-train_ind.f3, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.f3 <- glm(RET_S3 ~ . -GRADUATEIND, family = binomial, data = train.f3)
+step.retain.f3 <- stepAIC(retain.f3, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.f3, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.f3 <- predict(step.retain.f3, test.f3, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.f3 > .60)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f3$RET_S3, mode = "prec_recall")
+roc(test.f3$RET_S3, as.numeric(p.retain.f3))
+```
+
+# Fall 3 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# First Spring Cumulative GPA
+par.S1SEQ2_CUM_GPA  <- partial(step.retain.f3, pred.var = c("S1SEQ2_CUM_GPA"), chull = TRUE)
+plot.S1SEQ2_CUM_GPA  <- autoplot(par.S1SEQ2_CUM_GPA, contour = TRUE)
+
+# Cumulative Term GPA
+par.F3SEQ2_CUM_GPA  <- partial(step.retain.f3, pred.var = c("F3SEQ2_CUM_GPA"), chull = TRUE)
+plot.F3SEQ2_CUM_GPA  <- autoplot(par.F3SEQ2_CUM_GPA, contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.retain.f3, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS, contour = TRUE)
+
+# Student Athletes
+par.F3SEQ2_CURERNHRS <- partial(step.retain.f3, pred.var = c("F3SEQ2_CURERNHRS"), chull = TRUE)
+plot.F3SEQ2_CURERNHRS <- autoplot(par.F3SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.S1SEQ2_CUM_GPA, plot.F3SEQ2_CUM_GPA, plot.TRANS_HRS, plot.F3SEQ2_CURERNHRS)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.f3 <- glm(GRADUATEIND ~ . -RET_S3, family = binomial, data = train.f3)
+step.graduate.f3 <- stepAIC(graduate.f3, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.f3, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.f3 <- predict(step.graduate.f3, test.f3, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.f3 > .7)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f3$GRADUATEIND, mode = "prec_recall")
+roc(test.f3$GRADUATEIND, as.numeric(p.graduate.f3))
+```
+
+# Fall 3 Graduation Dependency Plots
+
+```{r}
+# Second Fall Term GPA
+par.F2SEQ2_TERM_GPA  <- partial(step.graduate.f3, pred.var = c("F2SEQ2_TERM_GPA"), chull = TRUE)
+plot.F2SEQ2_TERM_GPA  <- autoplot(par.F2SEQ2_TERM_GPA, contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.graduate.f3, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS , contour = TRUE)
+
+# Current Earned Hours
+par.F3SEQ2_CUMERNHRS  <- partial(step.graduate.f3, pred.var = c("F3SEQ2_CUMERNHRS"), chull = TRUE)
+plot.F3SEQ2_CUMERNHRS  <- autoplot(par.F3SEQ2_CUMERNHRS, contour = TRUE)
+
+# Current Term GPA
+par.F3SEQ2_TERM_GPA <- partial(step.graduate.f3, pred.var = c("F3SEQ2_TERM_GPA"), chull = TRUE)
+plot.F3SEQ2_TERM_GPA <- autoplot(par.F3SEQ2_TERM_GPA, contour = TRUE)
+
+grid.arrange(plot.F2SEQ2_TERM_GPA, plot.TRANS_HRS, plot.F3SEQ2_CUMERNHRS, plot.F3SEQ2_TERM_GPA)
+```
+
+### Spring 3 Semester 6
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_F4 <- s3$RET_F4 
+s3.x <- cbind(s3[,4:9], s3[,13:14], s3[18], s3[21], s3[,24:30], s3[,38:40], s3[42], s3[,50:52], s3[,54:55], s3[,62:64], s3[,66:67], s3[,74:76], s3[,78:79], s3[,86:88], s3[,90:91], s3[,98:100], s3[,102:103], s3[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+s3.rt.reduced <- cbind(RET_F4, s3.x)
+s3.knn <- knnImputation(s3.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.s3 <- floor(0.80 * nrow(s3.knn))
+
+set.seed(2)
+train_ind.s3 <- sample(seq_len(nrow(s3.knn)), size = smp_size.s3)
+
+train.s3 <- s3.knn[train_ind.s3, ]
+test.s3 <- s3.knn[-train_ind.s3, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.s3 <- glm(RET_F4 ~ . -GRADUATEIND, family = binomial, data = train.s3)
+step.retain.s3 <- stepAIC(retain.s3, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.s3, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.s3 <- predict(step.retain.s3, test.s3, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.s3 > .7)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s3$RET_F4, mode = "prec_recall")
+roc(test.s3$RET_F4, as.numeric(p.retain.s3))
+```
+
+# Spring 3 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# First Spring Term GPA
+par.S1SEQ2_TERM_GPA <- partial(step.retain.s3, pred.var = c("S1SEQ2_TERM_GPA"), chull = TRUE)
+plot.S1SEQ2_TERM_GPA  <- autoplot(par.S1SEQ2_TERM_GPA, contour = TRUE)
+
+# First Spring Earned Hours
+par.S1SEQ2_CURERNHRS  <- partial(step.retain.s3, pred.var = c("S1SEQ2_CURERNHRS"), chull = TRUE)
+plot.S1SEQ2_CURERNHRS  <- autoplot(par.S1SEQ2_CURERNHRS, contour = TRUE)
+
+# Third Fall Earned Hours
+par.F3SEQ2_CURERNHRS  <- partial(step.retain.s3, pred.var = c("F3SEQ2_CURERNHRS"), chull = TRUE)
+plot.F3SEQ2_CURERNHRS  <- autoplot(par.F3SEQ2_CURERNHRS, contour = TRUE)
+
+# Current Term Cumulative GPA
+par.S3SEQ2_CUM_GPA <- partial(step.retain.s3, pred.var = c("S3SEQ2_CUM_GPA"), chull = TRUE)
+plot.S3SEQ2_CUM_GPA <- autoplot(par.S3SEQ2_CUM_GPA, contour = TRUE)
+
+grid.arrange(plot.S1SEQ2_TERM_GPA, plot.S1SEQ2_CURERNHRS, plot.F3SEQ2_CURERNHRS, plot.S3SEQ2_CUM_GPA)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.s3 <- glm(GRADUATEIND ~ . -RET_F4, family = binomial, data = train.s3)
+step.graduate.s3 <- stepAIC(graduate.s3, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.s3, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.s3 <- predict(step.graduate.s3, test.s3, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.s3 > .75)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s3$GRADUATEIND, mode = "prec_recall")
+roc(test.s3$GRADUATEIND, as.numeric(p.graduate.s3))
+```
+
+# Spring 3 Graduation Dependency Plots
+
+```{r}
+# Age
+par.S3SEQ2_CUMERNHRS  <- partial(step.graduate.s3, pred.var = c("S3SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S3SEQ2_CUMERNHRS  <- autoplot(par.S3SEQ2_CUMERNHRS , contour = TRUE)
+
+# Transfer Hours
+par.TRANS_HRS  <- partial(step.graduate.s3, pred.var = c("TRANS_HRS"), chull = TRUE)
+plot.TRANS_HRS  <- autoplot(par.TRANS_HRS , contour = TRUE)
+
+# First Fall Earned Hours
+par.F1SEQ2_CUMERNHRS  <- partial(step.graduate.s3, pred.var = c("F1SEQ2_CUMERNHRS"), chull = TRUE)
+plot.F1SEQ2_CUMERNHRS  <- autoplot(par.F1SEQ2_CUMERNHRS, contour = TRUE)
+
+# Living On Campus
+par.S3SEQ2_TERM_GPA <- partial(step.graduate.s3, pred.var = c("S3SEQ2_TERM_GPA"), chull = TRUE)
+plot.S3SEQ2_TERM_GPA <- autoplot(par.S3SEQ2_TERM_GPA, contour = TRUE)
+
+grid.arrange(plot.S3SEQ2_CUMERNHRS, plot.TRANS_HRS, plot.F1SEQ2_CUMERNHRS, plot.S3SEQ2_TERM_GPA)
+```
+
+### Fall 4 Semester 7
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_S4 <- f4$RET_S4
+f4.x <- cbind(f4[,4:9], f4[,13:14], f4[18], f4[21], f4[,24:30], f4[,38:40], f4[42], f4[,50:52], f4[,54:55], f4[,62:64], f4[,66:67], f4[,74:76], f4[,78:79], f4[,86:88], f4[,90:91], f4[,98:100], f4[,102:103], f4[,110:112], f4[,114:115], f4[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+f4.rt.reduced <- cbind(RET_S4, f4.x)
+f4.knn <- knnImputation(f4.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.f4 <- floor(0.80 * nrow(f4.knn))
+
+set.seed(2)
+train_ind.f4 <- sample(seq_len(nrow(f4.knn)), size = smp_size.f4)
+
+train.f4 <- f4.knn[train_ind.f4, ]
+test.f4 <- f4.knn[-train_ind.f4, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.f4 <- glm(RET_S4 ~ . -GRADUATEIND, family = binomial, data = train.f4)
+step.retain.f4 <- stepAIC(retain.f4, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.f4, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.f4 <- predict(step.retain.f4, test.f4, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.f4 > .8)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f4$RET_S4, mode = "prec_recall")
+roc(test.f4$RET_S4, as.numeric(p.retain.f4))
+```
+
+# Fall 4 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# First Fall Term GPA
+par.F1SEQ2_TERM_GPA  <- partial(step.retain.f4, pred.var = c("F1SEQ2_TERM_GPA"), chull = TRUE)
+plot.F1SEQ2_TERM_GPA  <- autoplot(par.F1SEQ2_TERM_GPA, contour = TRUE)
+
+# Cumulative Term GPA
+par.F4SEQ2_CUM_GPA  <- partial(step.retain.f4, pred.var = c("F4SEQ2_CUM_GPA"), chull = TRUE)
+plot.F4SEQ2_CUM_GPA  <- autoplot(par.F4SEQ2_CUM_GPA, contour = TRUE)
+
+# Second Fall Earned Hours
+par.F2SEQ2_CUMERNHRS  <- partial(step.retain.f4, pred.var = c("F2SEQ2_CUMERNHRS"), chull = TRUE)
+plot.F2SEQ2_CUMERNHRS  <- autoplot(par.F2SEQ2_CUMERNHRS, contour = TRUE)
+
+# Second Fall Cumulative GPA
+par.F2SEQ2_CUM_GPA <- partial(step.retain.f4, pred.var = c("F2SEQ2_CUM_GPA"), chull = TRUE)
+plot.F2SEQ2_CUM_GPA <- autoplot(par.F2SEQ2_CUM_GPA, contour = TRUE)
+
+grid.arrange(plot.F1SEQ2_TERM_GPA, plot.F4SEQ2_CUM_GPA, plot.F2SEQ2_CUMERNHRS, plot.F2SEQ2_CUM_GPA)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.f4 <- glm(GRADUATEIND ~ . -RET_S4, family = binomial, data = train.f4)
+step.graduate.f4 <- stepAIC(graduate.f4, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.f4, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.f4 <- predict(step.graduate.f4, test.f4, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.f4 > .80)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f4$GRADUATEIND, mode = "prec_recall")
+roc(test.f4$GRADUATEIND, as.numeric(p.graduate.f4))
+```
+
+# Fall 4 Graduation Dependency Plots
+
+```{r}
+# Current Earned Hours
+par.F4SEQ2_CURERNHRS  <- partial(step.graduate.f4, pred.var = c("F4SEQ2_CURERNHRS"), chull = TRUE)
+plot.F4SEQ2_CURERNHRS  <- autoplot(par.F4SEQ2_CURERNHRS, contour = TRUE)
+
+# Second Spring Cumulative GPA
+par.S2SEQ2_CUM_GPA  <- partial(step.graduate.f4, pred.var = c("S2SEQ2_CUM_GPA"), chull = TRUE)
+plot.S2SEQ2_CUM_GPA  <- autoplot(par.S2SEQ2_CUM_GPA, contour = TRUE)
+
+# Second Fall Term GPA
+par.F2SEQ2_TERM_GPA  <- partial(step.graduate.f4, pred.var = c("F2SEQ2_TERM_GPA"), chull = TRUE)
+plot.F2SEQ2_TERM_GPA  <- autoplot(par.F2SEQ2_TERM_GPA, contour = TRUE)
+
+# Second Spring Attempted Hours
+par.S2SEQ2_CURATTHRS <- partial(step.graduate.f4, pred.var = c("S2SEQ2_CURATTHRS"), chull = TRUE)
+plot.S2SEQ2_CURATTHRS <- autoplot(par.S2SEQ2_CURATTHRS, contour = TRUE)
+
+grid.arrange(plot.F4SEQ2_CURERNHRS, plot.S2SEQ2_CUM_GPA, plot.F2SEQ2_TERM_GPA, plot.S2SEQ2_CURATTHRS)
+```
+
+### Spring 4 Semester 8
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_F5 <- s4$RET_F5 
+s4.x <- cbind(s4[,4:9], s4[,13:14], s4[18], s4[21], s4[,24:30], s4[,38:40], s4[42], s4[,50:52], s4[,54:55], s4[,62:64], s4[,66:67], s4[,74:76], s4[,78:79], s4[,86:88], s4[,90:91], s4[,98:100], s4[,102:103], s4[,110:112], s4[,114:115], s4[,122:124], s4[,126:127], s4[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+s4.rt.reduced <- cbind(RET_F5, s4.x)
+s4.knn <- knnImputation(s4.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.s4 <- floor(0.80 * nrow(s4.knn))
+
+set.seed(2)
+train_ind.s4 <- sample(seq_len(nrow(s4.knn)), size = smp_size.s4)
+
+train.s4 <- s4.knn[train_ind.s4, ]
+test.s4 <- s4.knn[-train_ind.s4, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.s4 <- glm(RET_F5 ~ . -GRADUATEIND, family = binomial, data = train.s4)
+step.retain.s4 <- stepAIC(retain.s4, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.s4, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.s4 <- predict(step.retain.s4, test.s4, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.s4 > .50)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s4$RET_F5, mode = "prec_recall")
+roc(test.s4$RET_F5, as.numeric(p.retain.s4))
+```
+
+# Spring 4 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# International Student
+par.INTERNATIONAL_IND <- partial(step.retain.s4, pred.var = c("INTERNATIONAL_IND"), chull = TRUE)
+plot.INTERNATIONAL_IND  <- autoplot(par.INTERNATIONAL_IND, contour = TRUE)
+
+# Fourth Spring Earned Hours
+par.S4SEQ2_CUMERNHRS  <- partial(step.retain.s4, pred.var = c("S4SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S4SEQ2_CUMERNHRS  <- autoplot(par.S4SEQ2_CUMERNHRS, contour = TRUE)
+
+# Third Spring Cumulative GPA
+par.S3SEQ2_CUM_GPA  <- partial(step.retain.s4, pred.var = c("S3SEQ2_CUM_GPA"), chull = TRUE)
+plot.S3SEQ2_CUM_GPA  <- autoplot(par.S3SEQ2_CUM_GPA, contour = TRUE)
+
+# Third Spring Earned Hours
+par.S3SEQ2_CUMERNHRS <- partial(step.retain.s4, pred.var = c("S3SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S3SEQ2_CUMERNHRS <- autoplot(par.S3SEQ2_CUMERNHRS, contour = TRUE)
+
+grid.arrange(plot.INTERNATIONAL_IND, plot.S4SEQ2_CUMERNHRS, plot.S3SEQ2_CUM_GPA, plot.S3SEQ2_CUMERNHRS)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.s4 <- glm(GRADUATEIND ~ . -RET_F5, family = binomial, data = train.s4)
+step.graduate.s4 <- stepAIC(graduate.s4, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.s4, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.s4 <- predict(step.graduate.s4, test.s4, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.s4 > .75)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s4$GRADUATEIND, mode = "prec_recall")
+roc(test.s4$GRADUATEIND, as.numeric(p.graduate.s4))
+```
+
+# Spring 4 Graduation Dependency Plots
+
+```{r}
+# Fourth Spring Cumulative GPA
+par.S4SEQ2_CUM_GPA  <- partial(step.graduate.s4, pred.var = c("S4SEQ2_CUM_GPA"), chull = TRUE)
+plot.S4SEQ2_CUM_GPA  <- autoplot(par.S4SEQ2_CUM_GPA, contour = TRUE)
+
+# Fourth Spring Earned Hours
+par.S4SEQ2_CURERNHRS  <- partial(step.graduate.s4, pred.var = c("S4SEQ2_CURERNHRS"), chull = TRUE)
+plot.S4SEQ2_CURERNHRS  <- autoplot(par.S4SEQ2_CURERNHRS, contour = TRUE)
+
+# Fourth Spring Attempted Hours
+par.S4SEQ2_CURATTHRS  <- partial(step.graduate.s4, pred.var = c("S4SEQ2_CURATTHRS"), chull = TRUE)
+plot.S4SEQ2_CURATTHRS  <- autoplot(par.S4SEQ2_CURATTHRS, contour = TRUE)
+
+# Fourth Fall Earned Hours
+par.F4SEQ2_CURERNHRS <- partial(step.graduate.s4, pred.var = c("F4SEQ2_CURERNHRS"), chull = TRUE)
+plot.F4SEQ2_CURERNHRS <- autoplot(par.F4SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.S4SEQ2_CUM_GPA, plot.S4SEQ2_CURERNHRS, plot.S4SEQ2_CURATTHRS, plot.F4SEQ2_CURERNHRS)
+```
+
+### Fall 5 Semester 9
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_S5 <- f5$RET_S5
+f5.x <- cbind(f5[,4:9], f5[,13:14], f5[18], f5[21], f5[,24:30], f5[,38:40], f5[42], f5[,50:52], f5[,54:55], f5[,62:64], f5[,66:67], f5[,74:76], f5[,78:79], f5[,86:88], f5[,90:91], f5[,98:100], f5[,102:103], f5[,110:112], f5[,114:115], f5[,122:124], f5[,126:127], f5[,134:136], f5[,138:139], f5[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+f5.rt.reduced <- cbind(RET_S5, f5.x)
+f5.knn <- knnImputation(f5.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.f5 <- floor(0.90 * nrow(f5.knn))
+
+set.seed(23)
+train_ind.f5 <- sample(seq_len(nrow(f5.knn)), size = smp_size.f5)
+
+train.f5 <- f5.knn[train_ind.f5, ]
+test.f5 <- f5.knn[-train_ind.f5, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.f5 <- glm(RET_S5 ~ . -GRADUATEIND, family = binomial, data = train.f5)
+step.retain.f5 <- stepAIC(retain.f5, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.f5, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.f5 <- predict(step.retain.f5, test.f5, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.f5 > .55)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f5$RET_S5, mode = "prec_recall")
+roc(test.f5$RET_S5, as.numeric(p.retain.f5))
+```
+
+# Fall 5 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Term Cumulative GPA
+par.F5SEQ2_CUM_GPA  <- partial(step.retain.f5, pred.var = c("F5SEQ2_CUM_GPA"), chull = TRUE)
+plot.F5SEQ2_CUM_GPA  <- autoplot(par.F5SEQ2_CUM_GPA, contour = TRUE)
+
+# Current Term Earned Hours
+par.F5SEQ2_CUMERNHRS  <- partial(step.retain.f5, pred.var = c("F5SEQ2_CUMERNHRS"), chull = TRUE)
+plot.F5SEQ2_CUMERNHRS  <- autoplot(par.F5SEQ2_CUMERNHRS, contour = TRUE)
+
+# Current Term Attempted Hours
+par.F5SEQ2_CURATTHRS  <- partial(step.retain.f5, pred.var = c("F5SEQ2_CURATTHRS"), chull = TRUE)
+plot.F5SEQ2_CURATTHRS  <- autoplot(par.F5SEQ2_CURATTHRS, contour = TRUE)
+
+# Third Spring Earned Hours
+par.S3SEQ2_CURERNHRS <- partial(step.retain.f5, pred.var = c("S3SEQ2_CURERNHRS"), chull = TRUE)
+plot.S3SEQ2_CURERNHRS <- autoplot(par.S3SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.F5SEQ2_CUM_GPA, plot.F5SEQ2_CUMERNHRS, plot.F5SEQ2_CURATTHRS, plot.S3SEQ2_CURERNHRS)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.f5 <- glm(GRADUATEIND ~ . -RET_S5, family = binomial, data = train.f5)
+step.graduate.f5 <- stepAIC(graduate.f5, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.f5, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.f5 <- predict(step.graduate.f5, test.f5, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.f5 > .70)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f5$GRADUATEIND, mode = "prec_recall")
+roc(test.f5$GRADUATEIND, as.numeric(p.graduate.f5))
+```
+
+# Fall 5 Graduation Dependency Plots
+
+```{r}
+# Current Term Cumulative GPA
+par.F5SEQ2_CUM_GPA  <- partial(step.graduate.f5, pred.var = c("F5SEQ2_CUM_GPA"), chull = TRUE)
+plot.F5SEQ2_CUM_GPA  <- autoplot(par.F5SEQ2_CUM_GPA, contour = TRUE)
+
+# Current Term Earned Hours
+par.F5SEQ2_CURERNHRS  <- partial(step.graduate.f5, pred.var = c("F5SEQ2_CURERNHRS"), chull = TRUE)
+plot.F5SEQ2_CURERNHRS  <- autoplot(par.F5SEQ2_CURERNHRS, contour = TRUE)
+
+# Fourth Spring Earned Hours
+par.S4SEQ2_CURERNHRS  <- partial(step.graduate.f5, pred.var = c("S4SEQ2_CURERNHRS"), chull = TRUE)
+plot.S4SEQ2_CURERNHRS  <- autoplot(par.S4SEQ2_CURERNHRS, contour = TRUE)
+
+# Second Fall Term GPA
+par.F2SEQ2_TERM_GPA <- partial(step.graduate.f5, pred.var = c("F2SEQ2_TERM_GPA"), chull = TRUE)
+plot.F2SEQ2_TERM_GPA <- autoplot(par.F2SEQ2_TERM_GPA, contour = TRUE)
+
+grid.arrange(plot.F5SEQ2_CUM_GPA, plot.F5SEQ2_CURERNHRS, plot.S4SEQ2_CURERNHRS, plot.F2SEQ2_TERM_GPA)
+```
+
+### Spring 5 Semester 10
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_F6 <- s5$RET_F6 
+s5.x <- cbind(s5[,4:9], s5[,13:14], s5[18], s5[21], s5[,24:30], s5[,38:40], s5[42], s5[,50:52], s5[,54:55], s5[,62:64], s5[,66:67], s5[,74:76], s5[,78:79], s5[,86:88], s5[,90:91], s5[,98:100], s5[,102:103], s5[,110:112], s5[,114:115], s5[,122:124], s5[,126:127], s5[,134:136], s5[,138:139], s5[,146:148], s5[,150:151], s5[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+s5.rt.reduced <- cbind(RET_F6, s5.x)
+s5.knn <- knnImputation(s5.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.s5 <- floor(0.90 * nrow(s5.knn))
+
+set.seed(2)
+train_ind.s5 <- sample(seq_len(nrow(s5.knn)), size = smp_size.s5)
+
+train.s5 <- s5.knn[train_ind.s5, ]
+test.s5 <- s5.knn[-train_ind.s5, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.s5 <- glm(RET_F6 ~ . -GRADUATEIND, family = binomial, data = train.s5)
+step.retain.s5 <- stepAIC(retain.s5, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.s5, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.s5 <- predict(step.retain.s5, test.s5, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.s5 > .50)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s5$RET_F6, mode = "prec_recall")
+roc(test.s5$RET_F6, as.numeric(p.retain.s5))
+```
+
+# Spring 4 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Term Cumulative GPA
+par.S5SEQ2_CUM_GPA <- partial(step.retain.s5, pred.var = c("S5SEQ2_CUM_GPA"), chull = TRUE)
+plot.S5SEQ2_CUM_GPA  <- autoplot(par.S5SEQ2_CUM_GPA, contour = TRUE)
+
+# Current Term Cumulative Earned Hours
+par.S5SEQ2_CUMERNHRS  <- partial(step.retain.s5, pred.var = c("S5SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S5SEQ2_CUMERNHRS  <- autoplot(par.S5SEQ2_CUMERNHRS, contour = TRUE)
+
+# Fifth Fall Earned Hours
+par.F5SEQ2_CURERNHRS  <- partial(step.retain.s5, pred.var = c("F5SEQ2_CURERNHRS"), chull = TRUE)
+plot.F5SEQ2_CURERNHRS  <- autoplot(par.F5SEQ2_CURERNHRS, contour = TRUE)
+
+# Fourth Fall Earned Hours
+par.F4SEQ2_CURERNHRS <- partial(step.retain.s5, pred.var = c("F4SEQ2_CURERNHRS"), chull = TRUE)
+plot.F4SEQ2_CURERNHRS <- autoplot(par.F4SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.S5SEQ2_CUM_GPA, plot.S5SEQ2_CUMERNHRS, plot.F5SEQ2_CURERNHRS, plot.F4SEQ2_CURERNHRS)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r}
+graduate.s5 <- glm(GRADUATEIND ~ . -RET_F6, family = binomial, data = train.s5)
+step.graduate.s5 <- stepAIC(graduate.s5, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.s5, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.s5 <- predict(step.graduate.s5, test.s5, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.s5 > .60)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s5$GRADUATEIND, mode = "prec_recall")
+roc(test.s5$GRADUATEIND, as.numeric(p.graduate.s5))
+```
+
+# Spring 4 Graduation Dependency Plots
+
+```{r}
+# Current Term Cumulative GPA
+par.S5SEQ2_CUM_GPA  <- partial(step.graduate.s5, pred.var = c("S5SEQ2_CUM_GPA"), chull = TRUE)
+plot.S5SEQ2_CUM_GPA  <- autoplot(par.S5SEQ2_CUM_GPA, contour = TRUE)
+
+# Current Term Earned Hours
+par.S5SEQ2_CURERNHRS  <- partial(step.graduate.s5, pred.var = c("S5SEQ2_CURERNHRS"), chull = TRUE)
+plot.S5SEQ2_CURERNHRS  <- autoplot(par.S5SEQ2_CURERNHRS, contour = TRUE)
+
+# Current Term Attempted Hours
+par.S5SEQ2_CURATTHRS  <- partial(step.graduate.s5, pred.var = c("S5SEQ2_CURATTHRS"), chull = TRUE)
+plot.S5SEQ2_CURATTHRS  <- autoplot(par.S5SEQ2_CURATTHRS, contour = TRUE)
+
+# Third Spring Cumulative Earned Hours
+par.S3SEQ2_CUMERNHRS <- partial(step.graduate.s5, pred.var = c("S3SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S3SEQ2_CUMERNHRS <- autoplot(par.S3SEQ2_CUMERNHRS, contour = TRUE)
+
+grid.arrange(plot.S5SEQ2_CUM_GPA, plot.S5SEQ2_CURERNHRS, plot.S5SEQ2_CURATTHRS, plot.S3SEQ2_CUMERNHRS)
+```
+
+### Fall 6 Semester 11
+
+## Retention Model
+
+First step is variable selection for each model. 
+
+```{r}
+RET_S6 <- f6$RET_S6
+f6.x <- cbind(f6[,4:9], f6[,13:14], f6[18], f6[21], f6[,24:30], f6[,38:40], f6[42], f6[,50:52], f6[,54:55], f6[,62:64], f6[,66:67], f6[,74:76], f6[,78:79], f6[,86:88], f6[,90:91], f6[,98:100], f6[,102:103], f6[,110:112], f6[,114:115], f6[,122:124], f6[,126:127], f6[,134:136], f6[,138:139], f6[,146:148], f6[,150:151], f6[,158:160], f6[,162:163], f6[176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+f6.rt.reduced <- cbind(RET_S6, f6.x)
+f6.knn <- knnImputation(f6.rt.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.f6 <- floor(0.90 * nrow(f6.knn))
+
+set.seed(2)
+train_ind.f6 <- sample(seq_len(nrow(f6.knn)), size = smp_size.f6)
+
+train.f6 <- f6.knn[train_ind.f6, ]
+test.f6 <- f6.knn[-train_ind.f6, ]
+```
+
+Fourth step is modeling the data and tuning with stepwise regression.
+
+```{r}
+retain.f6 <- glm(RET_S6 ~ . -GRADUATEIND, family = binomial, data = train.f6)
+step.retain.f6 <- stepAIC(retain.f6, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.retain.f6, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.retain.f6 <- predict(step.retain.f6, test.f6, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.retain.f6 > .60)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f6$RET_S6, mode = "prec_recall")
+roc(test.f6$RET_S6, as.numeric(p.retain.f6))
+```
+
+# Fall 6 Retention Dependency Plots
+
+You interpret these models by looking at the variation of the plotted line, this line will be absent with categorical variables, but you can see the variation in the y-axis. Those independent variables with high variation have significant effect on the model, where as those variables with lines near zero have little effect.
+
+```{r}
+# Current Term Cumulative GPA
+par.F6SEQ2_CUM_GPA  <- partial(step.retain.f6, pred.var = c("F6SEQ2_CUM_GPA"), chull = TRUE)
+plot.F6SEQ2_CUM_GPA  <- autoplot(par.F6SEQ2_CUM_GPA, contour = TRUE)
+
+# Current Term Cumulative Earned Hours
+par.F6SEQ2_CUMERNHRS  <- partial(step.retain.f6, pred.var = c("F6SEQ2_CUMERNHRS"), chull = TRUE)
+plot.F6SEQ2_CUMERNHRS  <- autoplot(par.F6SEQ2_CUMERNHRS, contour = TRUE)
+
+# Current Term Attempted Hours
+par.F6SEQ2_CURATTHRS  <- partial(step.retain.f6, pred.var = c("F6SEQ2_CURATTHRS"), chull = TRUE)
+plot.F6SEQ2_CURATTHRS  <- autoplot(par.F6SEQ2_CURATTHRS, contour = TRUE)
+
+# Fifth Fall Cumulative GPA
+par.F5SEQ2_CUM_GPA <- partial(step.retain.f6, pred.var = c("F5SEQ2_CUM_GPA"), chull = TRUE)
+plot.F5SEQ2_CUM_GPA <- autoplot(par.F5SEQ2_CUM_GPA, contour = TRUE)
+
+grid.arrange(plot.F6SEQ2_CUM_GPA, plot.F6SEQ2_CUMERNHRS, plot.F6SEQ2_CURATTHRS, plot.F5SEQ2_CUM_GPA)
+```
+
+## Graduation Model
+
+We can skip to the fourth step, as the data and already been prepared and split. 
+
+```{r warning=FALSE}
+graduate.f6 <- glm(GRADUATEIND ~ . -RET_S6, family = binomial, data = train.f6)
+step.graduate.f6 <- stepAIC(graduate.f6, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.f6, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.f6 <- predict(step.graduate.f6, test.f6, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.f6 > .50)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.f6$GRADUATEIND, mode = "prec_recall")
+roc(test.f6$GRADUATEIND, as.numeric(p.graduate.f6))
+```
+
+# Fall 6 Graduation Dependency Plots
+
+```{r}
+# Current Term Cumulative GPA
+par.F6SEQ2_CUM_GPA  <- partial(step.graduate.f6, pred.var = c("F6SEQ2_CUM_GPA"), chull = TRUE)
+plot.F6SEQ2_CUM_GPA  <- autoplot(par.F6SEQ2_CUM_GPA, contour = TRUE)
+
+# Fifth Spring Cumulative Earned Hours
+par.S5SEQ2_CUMERNHRS  <- partial(step.graduate.f6, pred.var = c("S5SEQ2_CUMERNHRS"), chull = TRUE)
+plot.S5SEQ2_CUMERNHRS  <- autoplot(par.S5SEQ2_CUMERNHRS, contour = TRUE)
+
+# Fifth Fall Cumulative GPA
+par.F5SEQ2_CUM_GPA  <- partial(step.graduate.f6, pred.var = c("F5SEQ2_CUM_GPA"), chull = TRUE)
+plot.F5SEQ2_CUM_GPA  <- autoplot(par.F5SEQ2_CUM_GPA, contour = TRUE)
+
+# Second Fall Term GPA
+par.F5SEQ2_CURERNHRS <- partial(step.graduate.f6, pred.var = c("F5SEQ2_CURERNHRS"), chull = TRUE)
+plot.F5SEQ2_CURERNHRS <- autoplot(par.F5SEQ2_CURERNHRS, contour = TRUE)
+
+grid.arrange(plot.F6SEQ2_CUM_GPA, plot.S5SEQ2_CUMERNHRS, plot.F5SEQ2_CUM_GPA, plot.F5SEQ2_CURERNHRS)
+```
+
+### Spring 6 Semester 12
+
+## Graduation Model
+
+First step is variable selection for each model. 
+
+```{r}
+s6.reduced <- cbind(s6[,4:9], s6[,13:14], s6[18], s6[21], s6[,24:30], s6[,38:40], s6[42], s6[,50:52], s6[,54:55], s6[,62:64], s6[,66:67], s6[,74:76], s6[,78:79], s6[,86:88], s6[,90:91], s6[,98:100], s6[,102:103], s6[,110:112], s6[,114:115], s6[,122:124], s6[,126:127], s6[,134:136], s6[,138:139], s6[,146:148], s6[,150:151], s6[,158:160], s6[,162:163], s6[,170:172], s6[,174:176])
+```
+
+Second step is imputing missing values. In this case, we have decided to use kNN imputation.
+
+```{r}
+s6.knn <- knnImputation(s6.reduced)
+```
+
+Third step is splitting the data into train and test. 
+
+```{r}
+smp_size.s6 <- floor(0.90 * nrow(s6.knn))
+
+set.seed(2)
+train_ind.s6 <- sample(seq_len(nrow(s6.knn)), size = smp_size.s6)
+
+train.s6 <- s6.knn[train_ind.s6, ]
+test.s6 <- s6.knn[-train_ind.s6, ]
+```
+
+Fourth is Modeling and tuning the model with stepwise regression.
+
+```{r warning=FALSE}
+graduate.s6 <- glm(GRADUATEIND ~ ., family = binomial, data = train.s6)
+step.graduate.s6 <- stepAIC(graduate.s6, trace = FALSE)
+```
+
+Finally, below is a list of the final variables with the importance expressed as a coefficient. The larger the coefficient, the higher the importance.
+
+```{r}
+varImp(step.graduate.s6, scale = FALSE)
+```
+
+# Model Evaluation
+
+```{r}
+p.graduate.s6 <- predict(step.graduate.s6, test.s6, type = "response")
+probability <- as.factor(ifelse(as.numeric(p.graduate.s6 > .30)==1, "Y", "N"))
+
+confusionMatrix(data = probability, reference = test.s6$GRADUATEIND, mode = "prec_recall")
+roc(test.s6$GRADUATEIND, as.numeric(p.graduate.s6))
+```
+
+# Spring 3 Graduation Dependency Plots
+
+```{r}
+# Fifth Fall Earned Hours
+par.F5SEQ2_CURERNHRS  <- partial(step.graduate.s6, pred.var = c("F5SEQ2_CURERNHRS"), chull = TRUE)
+plot.F5SEQ2_CURERNHRS  <- autoplot(par.F5SEQ2_CURERNHRS, contour = TRUE)
+
+# Second Spring Attempted Hours
+par.S2SEQ2_CURATTHRS  <- partial(step.graduate.s6, pred.var = c("S2SEQ2_CURATTHRS"), chull = TRUE)
+plot.S2SEQ2_CURATTHRS  <- autoplot(par.S2SEQ2_CURATTHRS, contour = TRUE)
+
+# Third Spring Earned Hours
+par.S3SEQ2_CURERNHRS  <- partial(step.graduate.s6, pred.var = c("S3SEQ2_CURERNHRS"), chull = TRUE)
+plot.S3SEQ2_CURERNHRS  <- autoplot(par.S3SEQ2_CURERNHRS, contour = TRUE)
+
+# Fifth Fall Cumulative GPA
+par.F5SEQ2_CUM_GPA <- partial(step.graduate.s6, pred.var = c("F5SEQ2_CUM_GPA"), chull = TRUE)
+plot.F5SEQ2_CUM_GPA <- autoplot(par.F5SEQ2_CUM_GPA, contour = TRUE)
+
+grid.arrange(plot.F5SEQ2_CURERNHRS, plot.S2SEQ2_CURATTHRS, plot.S3SEQ2_CURERNHRS, plot.F5SEQ2_CUM_GPA)
+```
